@@ -11,7 +11,7 @@
 
 Timer timer;
 
-const static int numberOfThreads = 16; //todo change
+const static int numberOfThreads = 32; //todo change
 
 
 uint64_t runTest(uint64_t size);
