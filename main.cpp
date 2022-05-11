@@ -11,8 +11,7 @@
 
 Timer timer;
 
-const static int numberOfThreads = 32; //todo change
-
+const static int numberOfThreads = 32;
 
 uint64_t runTest(uint64_t size);
 
@@ -35,16 +34,17 @@ int main(int argc, char **argv) {
 			case Mode::LIMITED:
 				std::cout << "[INFO] Running program in Limited mode." << std::endl;
 				result = runLimited();
+				test = runTest(32);
 				break;
 			case Mode::SCALABLE:
 				std::cout << "[INFO] Running program in Scalable mode." << std::endl;
 				result = runScalable(settings->size);
+				test = runTest(settings->size);
 				break;
 			case Mode::INVALID:
 				std::cout << "[ERROR] Invalid mode." << std::endl;
 				return EXIT_FAILURE;
 		}
-		test = runTest(settings->size);
 	} catch(std::exception &e) {
 		std::cerr << e.what() << std::endl;
 		return EXIT_FAILURE;
@@ -71,12 +71,14 @@ uint64_t runLimited() {
 
 #pragma omp parallel shared(M, y)
 		{
-#pragma omp for
+#pragma omp for ordered schedule(dynamic)
 			for(int i = offset; i < size; i++) {
+#pragma omp ordered
 				y[i] = y[i] + M[i - offset];
 			}
-#pragma omp for
+#pragma omp for ordered schedule(dynamic)
 			for(int i = offset; i < size; i++) {
+#pragma omp ordered
 				M[i] = y[i];
 			}
 		}
@@ -88,12 +90,17 @@ uint64_t runLimited() {
 }
 
 uint64_t runScalable(uint64_t size) {
+	if(size%numberOfThreads != 0) {
+		size = (size/numberOfThreads)*numberOfThreads;
+		std::cout << "[WARNING] size is not dividable by number of threads (32), size is changed to " << size
+				  << std::endl;
+	}
 	uint64_t y[size];
 	uint64_t z[size];
 	uint64_t si[numberOfThreads];
 	fillArray(y, size);
 	fillArray(z, size);
-	uint64_t dataIndex, end, offset, threadIndex, i, j;
+	uint64_t dataIndex, end, offset, threadIndex, i, j, sum;
 	omp_set_num_threads(numberOfThreads);
 
 	int stepsPerThread = size/numberOfThreads;
@@ -104,9 +111,7 @@ uint64_t runScalable(uint64_t size) {
 	{
 		threadIndex = omp_get_thread_num();
 		si[threadIndex] = 0;
-		for(dataIndex = threadIndex*stepsPerThread; (dataIndex < (threadIndex + 1)*stepsPerThread) ||
-													((dataIndex >= numberOfThreads*stepsPerThread) &&
-													 (dataIndex < size)); dataIndex++) {
+		for(dataIndex = threadIndex*stepsPerThread; (dataIndex < (threadIndex + 1)*stepsPerThread); dataIndex++) { /// each thread calculates its part
 			si[threadIndex] += *(y + dataIndex);
 			y[dataIndex] = si[threadIndex];
 		}
@@ -121,40 +126,40 @@ uint64_t runScalable(uint64_t size) {
 		offset = pow(2, j);
 #pragma omp parallel shared(y, z, stepsPerThread, numberOfThreads)
 		{
-#pragma omp for
+#pragma omp for ordered schedule(dynamic)
 			for(i = offset; i < numberOfThreads; i++) {
+#pragma omp ordered
 				z[i] += y[(i - offset + 1)*stepsPerThread - 1];
 			}
-#pragma omp for
+#pragma omp for ordered schedule(dynamic)
 			for(i = offset; i < numberOfThreads; i++) {
-				if(i == numberOfThreads - 1) {
-					y[size - 1] = z[i];
-				} else {
-					y[(i + 1)*stepsPerThread - 1] = z[i];
-				}
+#pragma omp ordered
+				y[(i + 1)*stepsPerThread - 1] = z[i];
 			}
 		}
 	}
 
-#pragma omp parallel shared(y, stepsPerThread, numberOfThreads) private(i, j)
+#pragma omp parallel shared(y, stepsPerThread, numberOfThreads) private(i, threadIndex)
 	{
-		j = omp_get_thread_num();
-		for(i = j*stepsPerThread; (i < (j + 1)*stepsPerThread - 1) ||
-								  ((i >= (numberOfThreads - 1)*stepsPerThread) && (i < size - 1)); i++) {
-			if(j != 0) {
-				y[i] += y[j*stepsPerThread - 1];
-			}
+		threadIndex = omp_get_thread_num();
+		for(i = threadIndex*stepsPerThread; (i < (threadIndex + 1)*stepsPerThread - 1); i++) {
+			y[i] += y[threadIndex*stepsPerThread - 1];
 		}
 	}
-
 
 	timer.stop();
-
 
 	return y[size - 1];
 }
 
+
+
 uint64_t runTest(uint64_t size) {
+	if(size%numberOfThreads != 0) {
+		size = (size/numberOfThreads)*numberOfThreads;
+		std::cout << "[WARNING] size is not dividable by number of threads (32), size is changed to " << size
+				  << std::endl;
+	}
 	uint64_t y[size];
 	fillArray(y, size);
 	uint64_t result = 0;
@@ -173,3 +178,4 @@ void fillArray(uint64_t *array, uint64_t size) {
 		array[i] = i + 1;
 	}
 }
+
